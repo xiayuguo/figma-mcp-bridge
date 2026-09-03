@@ -87,9 +87,9 @@ interface SaveScreenshotItemResult {
  * Registers all Figma bridge tools on the given MCP server.
  * @param server - The MCP server instance.
  * @param node - The node coordinator for leader/follower routing.
- * @param port - The port used for follower-to-leader HTTP calls.
+ * @param leaderUrl - The URL used for follower-to-leader HTTP calls.
  */
-export function registerTools(server: McpServer, node: Node, port: number): void {
+export function registerTools(server: McpServer, node: Node, leaderUrl: string): void {
   server.tool(
     "list_files",
     "List all currently connected Figma files. Returns fileKey and fileName for each. Use the fileKey to target a specific file in other tools.",
@@ -98,7 +98,7 @@ export function registerTools(server: McpServer, node: Node, port: number): void
         let files = node.listConnectedFiles();
         if (files === undefined) {
           // Follower: fetch via RPC from leader
-          const follower = new Follower(`http://localhost:${port}`);
+          const follower = new Follower(leaderUrl);
           files = await follower.listConnectedFiles();
         }
         return {

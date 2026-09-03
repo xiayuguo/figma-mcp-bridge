@@ -12,8 +12,8 @@ export class Node {
   private leader: Leader | null = null;
   private follower: Follower;
 
-  constructor(private port: number) {
-    this.follower = new Follower(`http://localhost:${port}`);
+  constructor(private port: number, private leaderUrl: string) {
+    this.follower = new Follower(leaderUrl);
   }
 
   get role(): Role {

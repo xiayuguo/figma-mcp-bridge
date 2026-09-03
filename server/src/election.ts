@@ -14,9 +14,10 @@ export class Election {
 
   constructor(
     private port: number,
-    private node: Node
+    private node: Node,
+    leaderUrl: string
   ) {
-    this.leaderUrl = `http://localhost:${port}`;
+    this.leaderUrl = leaderUrl;
   }
 
   async start(): Promise<void> {

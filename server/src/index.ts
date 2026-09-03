@@ -25,9 +25,25 @@ function resolvePort(): number {
 }
 const PORT = resolvePort();
 
+/**
+ * Resolve the leader URL for follower-to-leader HTTP calls.
+ * Defaults to localhost when FIGMA_BRIDGE_LEADER_URL is not set,
+ * enabling same-machine leader election out of the box.
+ * Set FIGMA_BRIDGE_LEADER_URL to a host:port string (e.g. "192.168.1.100:1994")
+ * to point a follower at a remote leader across machines.
+ */
+function resolveLeaderUrl(port: number): string {
+  const raw = process.env.FIGMA_BRIDGE_LEADER_URL;
+  if (raw !== undefined && raw.trim() !== "") {
+    return `http://${raw.trim()}`;
+  }
+  return `http://localhost:${port}`;
+}
+
 async function main(): Promise<void> {
-  const node = new Node(PORT);
-  const election = new Election(PORT, node);
+  const LEADER_URL = resolveLeaderUrl(PORT);
+  const node = new Node(PORT, LEADER_URL);
+  const election = new Election(PORT, node, LEADER_URL);
   await election.start();
 
   let transport: StdioServerTransport | null = null;
@@ -75,7 +91,7 @@ async function main(): Promise<void> {
     version: VERSION,
   });
 
-  registerTools(server, node, PORT);
+  registerTools(server, node, LEADER_URL);
 
   console.error(`Starting MCP server (role: ${node.roleName})`);
 
