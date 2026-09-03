@@ -166,6 +166,34 @@ For local development, add the following to your AI tool's MCP config:
 }
 ```
 
+### Leader / Follower mode (multi-machine setup)
+
+The MCP server can run in two roles:
+
+- **Leader** — binds the WebSocket server on port 1994 (default), accepts connections from Figma plugins
+- **Follower** — connects to a leader via HTTP and proxies all tool calls through it; useful when the AI tool runs on a different machine than the Figma plugin
+
+#### Start a leader (primary)
+
+```bash
+cd server && bun run build
+node dist/index.js
+# Or with custom port/host:
+node dist/index.js --port 1994 --host 0.0.0.0
+```
+
+#### Start a follower
+
+```bash
+cd server && bun run build
+# Point --leader-url at the leader's HTTP endpoint:
+node dist/index.js --leader-url 192.168.1.100:1994
+# Or via env var:
+FIGMA_BRIDGE_LEADER_URL=192.168.1.100:1994 node dist/index.js
+```
+
+The follower will automatically ping the leader's `/ping` endpoint to detect if the leader dies, and will attempt to take over if it does.
+
 ### Code style
 
 The repo is formatted with [Prettier](https://prettier.io) (config in `.prettierrc`). A Husky pre-commit hook runs `lint-staged`, which formats only your staged files, so commits stay formatted automatically. You can also run it manually:
