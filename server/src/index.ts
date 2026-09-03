@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Node } from "./node.js";
@@ -7,11 +8,69 @@ import { Election } from "./election.js";
 import { registerTools } from "./tools.js";
 import { VERSION } from "./version.js";
 
+interface CliValues {
+  "leader-url"?: string;
+  port?: string;
+  host?: string;
+}
+
+const CLI_OPTIONS = {
+  "leader-url": { type: "string" },
+  port: { type: "string" },
+  host: { type: "string" },
+} as const;
+
+function printHelp(): void {
+  console.log(`\
+figma-bridge v${VERSION}
+
+Usage: node index.js [OPTIONS]
+
+Options:
+  --leader-url <host:port>  URL of the leader node for cross-machine election
+                            (e.g. 192.168.1.100:1994)
+                            Env: FIGMA_BRIDGE_LEADER_URL
+  --port <port>             Port to listen on (default: 1994)
+                            Env: FIGMA_BRIDGE_PORT
+  --host <address>          Host to bind the leader HTTP server on (default: 0.0.0.0)
+                            Env: FIGMA_BRIDGE_HOST
+  -h, --help                Show this help message
+`);
+}
+
+function parseCliOptions(): CliValues {
+  try {
+    const result = parseArgs({ options: CLI_OPTIONS, allowPositionals: false });
+    return result.values as CliValues;
+  } catch {
+    return {};
+  }
+}
+
+// Check for --help / -h BEFORE parseArgs so unknown flags don't throw us into the catch
+if (process.argv.slice(2).some((a) => a === "--help" || a === "-h")) {
+  printHelp();
+  process.exit(0);
+}
+
+const cli: CliValues = parseCliOptions();
+
 // Overridable so a fork/test instance can run beside a stock 1994 bridge
 // without joining its leader election. The plugin must be built with the
 // matching VITE_FIGMA_BRIDGE_WS URL (which must also be listed in the
 // plugin manifest's networkAccess.allowedDomains).
+// CLI takes precedence over env vars.
 function resolvePort(): number {
+  // CLI: --port
+  if (cli.port !== undefined) {
+    const port = Number(cli.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      console.error(`Invalid --port "${cli.port}" — expected an integer between 1 and 65535`);
+      process.exit(1);
+    }
+    return port;
+  }
+  // Env: FIGMA_BRIDGE_PORT
   const raw = process.env.FIGMA_BRIDGE_PORT;
   if (raw === undefined) return 1994;
   const port = Number(raw.trim());
@@ -26,13 +85,40 @@ function resolvePort(): number {
 const PORT = resolvePort();
 
 /**
+ * Resolve the bind host for the leader HTTP server.
+ * Defaults to all interfaces (0.0.0.0) so followers on other machines can reach it.
+ * CLI: --host
+ * Env: FIGMA_BRIDGE_HOST
+ */
+function resolveHost(): string {
+  // CLI: --host
+  if (cli.host !== undefined) {
+    const raw = String(cli.host).trim();
+    if (raw !== "") return raw;
+  }
+  // Env: FIGMA_BRIDGE_HOST
+  const raw = process.env.FIGMA_BRIDGE_HOST;
+  if (raw !== undefined && raw.trim() !== "") {
+    return raw.trim();
+  }
+  return "0.0.0.0";
+}
+const HOST = resolveHost();
+
+/**
  * Resolve the leader URL for follower-to-leader HTTP calls.
- * Defaults to localhost when FIGMA_BRIDGE_LEADER_URL is not set,
+ * Defaults to localhost when FIGMA_BRIDGE_LEADER_URL / --leader-url is not set,
  * enabling same-machine leader election out of the box.
- * Set FIGMA_BRIDGE_LEADER_URL to a host:port string (e.g. "192.168.1.100:1994")
- * to point a follower at a remote leader across machines.
+ * Set --leader-url or FIGMA_BRIDGE_LEADER_URL to a host:port string
+ * (e.g. "192.168.1.100:1994") to point a follower at a remote leader across machines.
  */
 function resolveLeaderUrl(port: number): string {
+  // CLI: --leader-url
+  if (cli["leader-url"] !== undefined) {
+    const raw = String(cli["leader-url"]).trim();
+    if (raw !== "") return `http://${raw}`;
+  }
+  // Env: FIGMA_BRIDGE_LEADER_URL
   const raw = process.env.FIGMA_BRIDGE_LEADER_URL;
   if (raw !== undefined && raw.trim() !== "") {
     return `http://${raw.trim()}`;
@@ -42,7 +128,7 @@ function resolveLeaderUrl(port: number): string {
 
 async function main(): Promise<void> {
   const LEADER_URL = resolveLeaderUrl(PORT);
-  const node = new Node(PORT, LEADER_URL);
+  const node = new Node(PORT, HOST, LEADER_URL);
   const election = new Election(PORT, node, LEADER_URL);
   await election.start();
 

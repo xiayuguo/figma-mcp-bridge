@@ -12,7 +12,7 @@ export class Node {
   private leader: Leader | null = null;
   private follower: Follower;
 
-  constructor(private port: number, private leaderUrl: string) {
+  constructor(private port: number, private host: string, private leaderUrl: string) {
     this.follower = new Follower(leaderUrl);
   }
 
@@ -58,7 +58,7 @@ export class Node {
   async becomeLeader(): Promise<void> {
     if (this._role === Role.Leader) return;
 
-    const leader = new Leader(this.port);
+    const leader = new Leader(this.port, this.host);
     await leader.start();
 
     this.leader = leader;

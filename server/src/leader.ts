@@ -18,7 +18,7 @@ export class Leader {
   private bridge: Bridge;
   private server: http.Server | null = null;
 
-  constructor(private port: number) {
+  constructor(private port: number, private host: string = "0.0.0.0") {
     this.bridge = new Bridge();
   }
 
@@ -63,9 +63,9 @@ export class Leader {
         }
       });
 
-      server.listen(this.port, () => {
+      server.listen(this.port, this.host, () => {
         this.server = server;
-        console.error(`Leader listening on :${this.port}`);
+        console.error(`Leader listening on ${this.host}:${this.port}`);
         resolve();
       });
     });
