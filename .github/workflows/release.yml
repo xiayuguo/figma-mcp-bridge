@@ -1,26 +1,40 @@
 name: Release
 
+# Push a version tag to publish: bump server/package.json, commit, then
+#   git tag v1.2.3 && git push origin main v1.2.3
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version (semantic, e.g., 1.0.0)"
-        required: true
-        type: string
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
   id-token: write # Required for npm provenance (trusted publishing)
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate version format
+      - name: Resolve version from tag
+        id: version
         run: |
-          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'; then
-            echo "Error: Version must be semantic (e.g., 1.0.0, 1.0.0-beta.1)"
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Tag $GITHUB_REF_NAME is not a semantic version (e.g., v1.0.0, v1.0.0-beta.1)"
             exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Pre-releases go to the "next" dist-tag so they never become "latest"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm-tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout repository
@@ -38,6 +52,17 @@ jobs:
           bun-version: latest
 
       # ── Server: install, build, publish ──────────────────────────────
+
+      - name: Check package version matches tag
+        working-directory: server
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::server/package.json is $PKG_VERSION but the tag is v$VERSION. Bump the version, commit, and tag that commit."
+            exit 1
+          fi
 
       - name: Install server dependencies
         working-directory: server
@@ -58,13 +83,19 @@ jobs:
       - name: Bundle README for npm
         run: cp README.md server/README.md
 
-      - name: Set package version
-        working-directory: server
-        run: npm version ${{ inputs.version }} --no-git-tag-version
-
       - name: Publish to npm (with provenance)
         working-directory: server
-        run: npm publish --access public --provenance
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NPM_TAG: ${{ steps.version.outputs.npm-tag }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          # Skip on re-runs so a failed release step can be retried
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm, skipping publish"
+          else
+            npm publish --access public --provenance --tag "$NPM_TAG"
+          fi
         # env:
         #   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -81,6 +112,8 @@ jobs:
       # ── Package GitHub release ───────────────────────────────────────
 
       - name: Package release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p release/plugin
 
@@ -94,12 +127,13 @@ jobs:
 
           # Create zip
           cd release
-          zip -r ../figma-mcp-bridge-v${{ inputs.version }}.zip .
+          zip -r "../figma-mcp-bridge-v$VERSION.zip" .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version }}
-          name: Release v${{ inputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
-          files: figma-mcp-bridge-v${{ inputs.version }}.zip
+          files: figma-mcp-bridge-v${{ steps.version.outputs.version }}.zip
