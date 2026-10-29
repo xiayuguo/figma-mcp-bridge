@@ -48,6 +48,14 @@ const fileKeyField = z
     "The fileKey of the Figma file to query. Required when multiple files are connected. Use list_files to see connected files."
   );
 
+export const figmaUrlField = z
+  .string()
+  .url()
+  .optional()
+  .describe(
+    "A Figma design/file link, e.g. one the user pasted. If its file is not connected yet, it is opened on the leader Mac and the plugin is launched automatically. Its fileKey is used, and its node-id where the tool targets nodes and none was given."
+  );
+
 const gradientStop = z.object({
   position: z
     .number()

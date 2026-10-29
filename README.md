@@ -65,6 +65,7 @@ If you want to know more about how it works, read the [How it works](#how-it-wor
 | Tool                           | Description                                                                            |
 | ------------------------------ | -------------------------------------------------------------------------------------- |
 | `list_files`                   | List all connected Figma files (supports multi-file workflows)                         |
+| `open_figma_url`               | Open a Figma link on the leader Mac and wait until its plugin connects (idempotent)    |
 | `get_document`                 | Get the current Figma page document tree                                               |
 | `get_selection`                | Get the currently selected nodes in Figma                                              |
 | `get_node`                     | Get a specific Figma node by ID (colon format, e.g. `4029:12345`)                      |
@@ -104,7 +105,13 @@ If you want to know more about how it works, read the [How it works](#how-it-wor
 | `scroll_and_zoom_into_view`    | Frame the viewport around the given nodes (works in Dev Mode)                          |
 | `delete_nodes`                 | Delete nodes with explicit confirmation                                                |
 
-All tools accept an optional `fileKey` parameter when multiple Figma files are connected. Use `list_files` to discover connected files and their keys.
+File operations accept an optional `fileKey` parameter when multiple Figma files are connected. Use `list_files` to discover connected files and their keys.
+
+`open_figma_url` makes sure a Figma file is connected. It routes to the leader Mac. If that file's plugin is already connected, it returns immediately. Otherwise it opens the link in the Figma desktop app, runs **Plugins → Development → Figma MCP Bridge** through macOS UI automation, and returns only once the plugin for that `fileKey` has connected. If the English menu path is missing, it falls back to Quick Actions (⌘/). If the plugin does not connect in time, it retries the launch once. Concurrent calls for the same file share one launch.
+
+The read tools (`get_document`, `get_selection`, `get_node`, `get_styles`, `get_metadata`, `get_design_context`, `get_variable_defs`, `get_screenshot`) also accept a `url` parameter. Pass the link the user pasted: the file is opened on demand, its `fileKey` is used, and `get_node` / `get_screenshot` default to the link's `node-id`. Other pages of an already-connected file need no reopening, because nodes on any page are reachable by ID.
+
+Leader Mac requirements: import this repository's plugin (set `FIGMA_BRIDGE_PLUGIN_NAME` if you renamed it), grant Accessibility permission to the process hosting the server in System Settings, and keep the desktop session logged in and unlocked. Keep the input source set to an ASCII layout so the Quick Actions fallback can type the plugin name. For remote use, point the follower's `FIGMA_BRIDGE_LEADER_URL` at that Mac.
 
 ### Editing Notes
 

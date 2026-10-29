@@ -1,3 +1,5 @@
+import { openFigmaUrl } from "./open-figma.js";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import type { Duplex } from "node:stream";
 import { Bridge } from "./bridge.js";
@@ -6,6 +8,9 @@ import { executeSaveScreenshots } from "./tools.js";
 import type { ExportFormat } from "./tools.js";
 import type { RPCRequest, RPCResponse } from "./types.js";
 import { VERSION } from "./version.js";
+
+/** Identifies this process in /ping so a node can tell its own leader apart from a remote one. */
+export const INSTANCE_ID = randomUUID();
 
 /**
  * Leader owns the WebSocket bridge to Figma and exposes HTTP endpoints for followers.
@@ -18,7 +23,10 @@ export class Leader {
   private bridge: Bridge;
   private server: http.Server | null = null;
 
-  constructor(private port: number, private host: string = "0.0.0.0") {
+  constructor(
+    private port: number,
+    private host: string = "0.0.0.0"
+  ) {
     this.bridge = new Bridge();
   }
 
@@ -31,7 +39,7 @@ export class Leader {
       const server = http.createServer((req, res) => {
         if (req.url === "/ping" && req.method === "GET") {
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ status: "ok", version: VERSION }));
+          res.end(JSON.stringify({ status: "ok", version: VERSION, instanceId: INSTANCE_ID }));
           return;
         }
 
@@ -85,6 +93,11 @@ export class Leader {
           this.sendJSON(res, 200, {
             data: this.bridge.listConnectedFiles(),
           });
+          return;
+        }
+
+        if (rpcReq.tool === "open_figma_url") {
+          this.sendJSON(res, 200, { data: await openFigmaUrl(rpcReq.params?.url, this.bridge) });
           return;
         }
 

@@ -1,3 +1,4 @@
+import { openFigmaUrl } from "./open-figma.js";
 import { Leader } from "./leader.js";
 import { Follower } from "./follower.js";
 import { Role } from "./types.js";
@@ -12,7 +13,11 @@ export class Node {
   private leader: Leader | null = null;
   private follower: Follower;
 
-  constructor(private port: number, private host: string, private leaderUrl: string) {
+  constructor(
+    private port: number,
+    private host: string,
+    private leaderUrl: string
+  ) {
     this.follower = new Follower(leaderUrl);
   }
 
@@ -42,6 +47,13 @@ export class Node {
     fileKey?: string
   ): Promise<BridgeResponse> {
     if (this._role === Role.Leader && this.leader) {
+      if (requestType === "open_figma_url") {
+        return openFigmaUrl(params?.url, this.leader.getBridge()).then((data) => ({
+          type: requestType,
+          requestId: "",
+          data,
+        }));
+      }
       return this.leader.getBridge().sendWithParams(requestType, nodeIds, params, fileKey);
     }
     return this.follower.sendWithParams(requestType, nodeIds, params, fileKey);

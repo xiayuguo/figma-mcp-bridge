@@ -23,6 +23,7 @@ export class Bridge {
   private pending = new Map<string, PendingRequest>();
   private counter = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private connectionWaiters = new Map<string, Set<() => void>>();
 
   constructor() {
     this.wss = new WebSocketServer({ noServer: true });
@@ -78,6 +79,12 @@ export class Bridge {
       isAlive: true,
     });
     console.error(`Plugin connected: ${fileName} (${fileKey})`);
+
+    const waiters = this.connectionWaiters.get(fileKey);
+    if (waiters) {
+      this.connectionWaiters.delete(fileKey);
+      for (const notify of waiters) notify();
+    }
 
     ws.on("pong", () => {
       const entry = this.connections.get(fileKey);
@@ -169,6 +176,33 @@ export class Bridge {
     }));
   }
 
+  getConnectedFile(fileKey: string): ConnectedFile | undefined {
+    const entry = this.connections.get(fileKey);
+    if (!entry || entry.ws.readyState !== WebSocket.OPEN) return undefined;
+    return { fileKey: entry.fileKey, fileName: entry.fileName };
+  }
+
+  /** Resolves with the file once a plugin for fileKey is connected, or undefined on timeout. */
+  waitForFile(fileKey: string, timeoutMs: number): Promise<ConnectedFile | undefined> {
+    const connected = this.getConnectedFile(fileKey);
+    if (connected) return Promise.resolve(connected);
+
+    return new Promise((resolve) => {
+      const waiters = this.connectionWaiters.get(fileKey) ?? new Set();
+      this.connectionWaiters.set(fileKey, waiters);
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        if (waiters.size === 0 && this.connectionWaiters.get(fileKey) === waiters) {
+          this.connectionWaiters.delete(fileKey);
+        }
+        resolve(this.getConnectedFile(fileKey));
+      };
+      const timer = setTimeout(done, timeoutMs);
+      waiters.add(done);
+    });
+  }
+
   send(requestType: string, nodeIds?: string[], fileKey?: string): Promise<BridgeResponse> {
     return this.sendWithParams(requestType, nodeIds, undefined, fileKey);
   }
@@ -243,6 +277,11 @@ export class Bridge {
       reject(new Error("Bridge closed"));
     }
     this.pending.clear();
+
+    for (const waiters of this.connectionWaiters.values()) {
+      for (const notify of [...waiters]) notify();
+    }
+    this.connectionWaiters.clear();
 
     for (const [, entry] of this.connections) {
       entry.ws.close();

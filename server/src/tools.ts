@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Node } from "./node.js";
 import {
   createFrameInput,
@@ -29,8 +29,10 @@ import {
   ungroupNodeInput,
   setTextPropertiesShape,
   setTextPropertiesInput,
+  figmaUrlField,
   toolInputSchemas,
 } from "./schema.js";
+import { parseFigmaUrl } from "./open-figma.js";
 import type { BridgeResponse } from "./types.js";
 import { Follower } from "./follower.js";
 
@@ -91,6 +93,14 @@ interface SaveScreenshotItemResult {
  */
 export function registerTools(server: McpServer, node: Node, leaderUrl: string): void {
   server.tool(
+    "open_figma_url",
+    "Make sure a Figma file is connected: if it is not, open the link on the leader Mac, launch the Figma MCP Bridge development plugin, and wait until it connects. Safe to call repeatedly. Returns the fileKey, fileName, and the link's node-id in colon format. Read tools also accept the link directly via their url parameter.",
+    { url: z.string().url() },
+    async ({ url }): Promise<ToolResult> =>
+      renderResponse(() => node.sendWithParams("open_figma_url", undefined, { url }))
+  );
+
+  server.tool(
     "list_files",
     "List all currently connected Figma files. Returns fileKey and fileName for each. Use the fileKey to target a specific file in other tools.",
     async (): Promise<ToolResult> => {
@@ -121,82 +131,111 @@ export function registerTools(server: McpServer, node: Node, leaderUrl: string):
   server.tool(
     "get_document",
     "Get the current Figma page document tree. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_document.shape,
-    async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_document", undefined, fileKey));
+    { ...toolInputSchemas.get_document.shape, url: figmaUrlField },
+    async ({ fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.send("get_document", undefined, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_selection",
     "Get the currently selected nodes in Figma. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_selection.shape,
-    async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_selection", undefined, fileKey));
+    { ...toolInputSchemas.get_selection.shape, url: figmaUrlField },
+    async ({ fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.send("get_selection", undefined, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_node",
     "Get a specific Figma node by ID. Accepts top-level IDs like '4029:12345' and instance-child IDs like 'I12740:17806;12740:17793'. Never use hyphens. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_node.shape,
-    async ({ nodeId, fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_node", [nodeId], fileKey));
+    {
+      ...toolInputSchemas.get_node.shape,
+      nodeId: toolInputSchemas.get_node.shape.nodeId.optional(),
+      url: figmaUrlField,
+    },
+    async ({ nodeId, fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        const id = nodeId ?? target.nodeId;
+        if (!id) throw new Error("Provide nodeId, or a url whose link includes a node-id");
+        return node.send("get_node", [id], target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_styles",
     "Get all local styles in the document. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_styles.shape,
-    async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_styles", undefined, fileKey));
+    { ...toolInputSchemas.get_styles.shape, url: figmaUrlField },
+    async ({ fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.send("get_styles", undefined, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_metadata",
     "Get metadata about the current Figma document including file name, pages, and current page info. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_metadata.shape,
-    async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_metadata", undefined, fileKey));
+    { ...toolInputSchemas.get_metadata.shape, url: figmaUrlField },
+    async ({ fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.send("get_metadata", undefined, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_design_context",
     "Get the design context for the current selection or page. Returns a summarized tree structure optimized for understanding the current design context. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_design_context.shape,
-    async ({ depth, fileKey }): Promise<ToolResult> => {
+    { ...toolInputSchemas.get_design_context.shape, url: figmaUrlField },
+    async ({ depth, fileKey, url }): Promise<ToolResult> => {
       const params: Record<string, unknown> = {};
       if (depth !== undefined && depth > 0) {
         params.depth = depth;
       }
-      return renderResponse(() =>
-        node.sendWithParams("get_design_context", undefined, params, fileKey)
-      );
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.sendWithParams("get_design_context", undefined, params, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_variable_defs",
     "Get all local variable definitions including variable collections, modes, and variable values. Variables are Figma's system for design tokens (colors, numbers, strings, booleans). When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_variable_defs.shape,
-    async ({ fileKey }): Promise<ToolResult> => {
-      return renderResponse(() => node.send("get_variable_defs", undefined, fileKey));
+    { ...toolInputSchemas.get_variable_defs.shape, url: figmaUrlField },
+    async ({ fileKey, url }): Promise<ToolResult> => {
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        return node.send("get_variable_defs", undefined, target.fileKey);
+      });
     }
   );
 
   server.tool(
     "get_screenshot",
     "Export a screenshot of the selected nodes or specific nodes by ID. Returns base64-encoded image data. When multiple files are connected, specify fileKey.",
-    toolInputSchemas.get_screenshot.shape,
-    async ({ nodeIds, format, scale, clip, fileKey }): Promise<ToolResult> => {
+    { ...toolInputSchemas.get_screenshot.shape, url: figmaUrlField },
+    async ({ nodeIds, format, scale, clip, fileKey, url }): Promise<ToolResult> => {
       const params: Record<string, unknown> = {};
       if (format) params.format = format;
       if (scale !== undefined && scale > 0) params.scale = scale;
       if (clip !== undefined) params.clip = clip;
-      return renderResponse(() => node.sendWithParams("get_screenshot", nodeIds, params, fileKey));
+      return renderResponse(async () => {
+        const target = await resolveFigmaUrl(node, url, fileKey);
+        const ids = nodeIds?.length ? nodeIds : target.nodeId ? [target.nodeId] : undefined;
+        return node.sendWithParams("get_screenshot", ids, params, target.fileKey);
+      });
     }
   );
 
@@ -659,6 +698,29 @@ export async function executeSaveScreenshots(
  * @param fn - Bridge call to execute.
  * @returns Tool result with the bridge response or an error message.
  */
+/**
+ * Resolves an optional Figma link to the fileKey and node ID it points at,
+ * first making sure that file is connected (the leader opens it and launches
+ * the plugin when needed).
+ * @param node - The node coordinator for leader/follower routing.
+ * @param url - Optional Figma design/file link.
+ * @param fileKey - Explicit fileKey, which must match the link when both are given.
+ * @returns The fileKey to target and the link's node ID, if any.
+ */
+async function resolveFigmaUrl(
+  node: Node,
+  url: string | undefined,
+  fileKey: string | undefined
+): Promise<{ fileKey?: string; nodeId?: string }> {
+  if (!url) return { fileKey };
+  const target = parseFigmaUrl(url);
+  if (fileKey && fileKey !== target.fileKey) {
+    throw new Error(`fileKey "${fileKey}" does not match the file in url ("${target.fileKey}")`);
+  }
+  await node.sendWithParams("open_figma_url", undefined, { url: target.url });
+  return { fileKey: target.fileKey, nodeId: target.nodeId };
+}
+
 async function renderResponse(fn: () => Promise<BridgeResponse>): Promise<ToolResult> {
   try {
     const resp = await fn();
