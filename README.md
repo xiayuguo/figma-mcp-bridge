@@ -33,30 +33,65 @@ It also includes a small, opt-in set of **write tools** for safe agent-driven ed
 
 ## Quick Start
 
+### Prerequisites
+
+- Node.js 20 or newer (for `npx`)
+- The Figma desktop app (development plugins can only be imported there)
+
 ### 1. Add the MCP server to your favourite AI tool
 
-Add the following to your AI tool's MCP configuration (e.g. Cursor, Windsurf, Claude Desktop):
+Add the following to your AI tool's MCP configuration (e.g. `~/.cursor/mcp.json` for Cursor, `~/Library/Application Support/Claude/claude_desktop_config.json` for Claude Desktop):
 
 ```json
 {
-  "figma-bridge": {
-    "command": "npx",
-    "args": ["-y", "@gethopp/figma-mcp-bridge"]
+  "mcpServers": {
+    "figma-bridge": {
+      "command": "npx",
+      "args": ["-y", "@xiayuguo/figma-mcp-bridge"]
+    }
   }
 }
 ```
 
-That's it — no binaries to download or install.
+Or add it from the command line:
+
+```bash
+# Claude Code (--scope user makes it available in every project)
+claude mcp add --scope user figma-bridge -- npx -y @xiayuguo/figma-mcp-bridge
+
+# Codex CLI (writes to ~/.codex/config.toml)
+codex mcp add figma-bridge -- npx -y @xiayuguo/figma-mcp-bridge
+```
+
+For Codex, this is equivalent to adding the following to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.figma-bridge]
+command = "npx"
+args = ["-y", "@xiayuguo/figma-mcp-bridge"]
+```
+
+That's it — no binaries to download or install. The AI tool starts the server on demand, and it listens on `localhost:1994`.
 
 ### 2. Add the Figma plugin
 
-Download the plugin from the [latest release](https://github.com/gethopp/figma-mcp-bridge/releases) page, then in Figma go to `Plugins > Development > Import plugin from manifest` and select the `manifest.json` file from the `plugin/` folder.
+1. Download `figma-mcp-bridge-vX.Y.Z.zip` from the [latest release](https://github.com/xiayuguo/figma-mcp-bridge/releases) page.
+2. Unzip it somewhere permanent (e.g. `~/figma-plugins/figma-mcp-bridge/`). Figma loads the plugin from this path every time, so don't delete or move it.
+3. In the Figma desktop app, go to `Plugins > Development > Import plugin from manifest` and select the `manifest.json` file from the `plugin/` folder.
 
 ### 3. Start using it 🎉
 
-Open a Figma file, run the plugin, and start prompting your AI tool. The MCP server will automatically connect to the plugin.
+1. Start your AI tool, which launches the MCP server.
+2. Open a Figma file and run `Plugins > Development > Figma MCP Bridge`.
+3. Ask your AI tool to call `list_files`. If the file shows up, you're connected — paste a Figma link and start prompting.
 
 To work across multiple files, just open the plugin in each Figma file. The bridge keeps all connections active and your AI agent can target any of them by `fileKey`.
+
+### Notes
+
+- **Keep the default port.** The plugin's `manifest.json` only allows connections to `ws://localhost:1994`, so changing `--port` / `FIGMA_BRIDGE_PORT` will stop the plugin from connecting.
+- **Opening links automatically.** `open_figma_url` (and read tools given a `url`) drive the Figma desktop app via macOS UI automation. Grant Accessibility permission to the app hosting the MCP server (Terminal, Cursor, Claude, …) in `System Settings > Privacy & Security > Accessibility`, keep the screen unlocked, and use an ASCII input source.
+- **AI tool on a different machine.** Run the server on the Figma machine as the leader with `--host 0.0.0.0`, and set `FIGMA_BRIDGE_LEADER_URL=<leader-ip>:1994` in the other machine's MCP config `env`. See [Leader / Follower mode](#leader--follower-mode-multi-machine-setup).
 
 If you want to know more about how it works, read the [How it works](#how-it-works) section.
 
@@ -137,7 +172,7 @@ This repo uses [Bun](https://bun.sh) as its package manager and script runner th
 #### 1. Clone this repository locally
 
 ```bash
-git clone git@github.com:gethopp/figma-mcp-bridge.git
+git clone git@github.com:xiayuguo/figma-mcp-bridge.git
 ```
 
 #### 2. Install root tooling
