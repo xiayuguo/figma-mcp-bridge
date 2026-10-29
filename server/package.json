@@ -23,12 +23,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gethopp/figma-mcp-bridge.git",
+    "url": "git+https://github.com/xiayuguo/figma-mcp-bridge.git",
     "directory": "server"
   },
-  "homepage": "https://github.com/gethopp/figma-mcp-bridge#readme",
+  "homepage": "https://github.com/xiayuguo/figma-mcp-bridge#readme",
   "bugs": {
-    "url": "https://github.com/gethopp/figma-mcp-bridge/issues"
+    "url": "https://github.com/xiayuguo/figma-mcp-bridge/issues"
   },
   "license": "MIT",
   "dependencies": {
